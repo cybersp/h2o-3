@@ -5,8 +5,17 @@ import os
 import h2o
 sys.path.insert(1, os.path.join("..", "..", "..", "h2o-py"))
 from tests import pyunit_utils
-from h2o.estimators.gbm import H2OGradientBoostingEstimator
 
+def adapt_airlines(airlines_dataset):
+    airlines_dataset["table_for_h2o_import.origin"] = airlines_dataset["table_for_h2o_import.origin"].asfactor()
+    airlines_dataset["table_for_h2o_import.fdayofweek"] = airlines_dataset["table_for_h2o_import.fdayofweek"].asfactor()
+    airlines_dataset["table_for_h2o_import.uniquecarrier"] = airlines_dataset["table_for_h2o_import.uniquecarrier"].asfactor()
+    airlines_dataset["table_for_h2o_import.dest"] = airlines_dataset["table_for_h2o_import.dest"].asfactor()
+    airlines_dataset["table_for_h2o_import.fyear"] = airlines_dataset["table_for_h2o_import.fyear"].asfactor()
+    airlines_dataset["table_for_h2o_import.fdayofmonth"] = airlines_dataset["table_for_h2o_import.fdayofmonth"].asfactor()
+    airlines_dataset["table_for_h2o_import.isdepdelayed"] = airlines_dataset["table_for_h2o_import.isdepdelayed"].asfactor()
+    airlines_dataset["table_for_h2o_import.fmonth"] = airlines_dataset["table_for_h2o_import.fmonth"].asfactor()
+    return airlines_dataset
 
 def gbm_on_hive():
     connection_url = "jdbc:hive2://localhost:10000/default"
@@ -17,24 +26,25 @@ def gbm_on_hive():
     select_query = "select * from airlinestest"
     username = "hive"
     password = ""
+
+    # read from S3
     airlines_dataset_original = h2o.import_file(path="https://s3.amazonaws.com/h2o-public-test-data/smalldata/airlines/AirlinesTest.csv.zip")
+    # read from Hive Distributed
     airlines_dataset = h2o.import_sql_select(connection_url, select_query, username, password)
+    # read from Hive Streaming
+    airlines_dataset_streaming = h2o.import_sql_select(connection_url, select_query, username, password, streaming=True)
+
+    # datasets should be identical from user's point of view
     pyunit_utils.compare_frames(airlines_dataset_original, airlines_dataset, 100, tol_numeric=0)
-    airlines_dataset["table_for_h2o_import.origin"] = airlines_dataset["table_for_h2o_import.origin"].asfactor()
-    airlines_dataset["table_for_h2o_import.fdayofweek"] = airlines_dataset["table_for_h2o_import.fdayofweek"].asfactor()
-    airlines_dataset["table_for_h2o_import.uniquecarrier"] = airlines_dataset["table_for_h2o_import.uniquecarrier"].asfactor()
-    airlines_dataset["table_for_h2o_import.dest"] = airlines_dataset["table_for_h2o_import.dest"].asfactor()
-    airlines_dataset["table_for_h2o_import.fyear"] = airlines_dataset["table_for_h2o_import.fyear"].asfactor()
-    airlines_dataset["table_for_h2o_import.fdayofmonth"] = airlines_dataset["table_for_h2o_import.fdayofmonth"].asfactor()
-    airlines_dataset["table_for_h2o_import.isdepdelayed"] = airlines_dataset["table_for_h2o_import.isdepdelayed"].asfactor()
-    airlines_dataset["table_for_h2o_import.fmonth"] = airlines_dataset["table_for_h2o_import.fmonth"].asfactor()
+    pyunit_utils.compare_frames(airlines_dataset_original, airlines_dataset_streaming, 100, tol_numeric=0)
+
+    from h2o.estimators.gbm import H2OGradientBoostingEstimator
     airlines_X_col_names = airlines_dataset.col_names[:-2]
     airlines_y_col_name = airlines_dataset.col_names[-2]
-    train, valid, test = airlines_dataset.split_frame([0.6, 0.2], seed=1234)
-    from h2o.estimators.gbm import H2OGradientBoostingEstimator
     gbm_v1 = H2OGradientBoostingEstimator(model_id="gbm_airlines_v1", seed=2000000)
-    gbm_v1.train(airlines_X_col_names, airlines_y_col_name, training_frame=train, validation_frame=valid)
-    gbm_v1.predict(test)
+    gbm_v1.train(airlines_X_col_names, airlines_y_col_name,
+                 training_frame=airlines_dataset, validation_frame=airlines_dataset_streaming)
+    assert gbm_v1.auc(train=True) == gbm_v1.auc(valid=True)
 
 
 if __name__ == "__main__":
