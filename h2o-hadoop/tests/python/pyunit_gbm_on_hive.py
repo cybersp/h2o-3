@@ -31,8 +31,10 @@ def gbm_on_hive():
     airlines_dataset_original = h2o.import_file(path="https://s3.amazonaws.com/h2o-public-test-data/smalldata/airlines/AirlinesTest.csv.zip")
     # read from Hive Distributed
     airlines_dataset = h2o.import_sql_select(connection_url, select_query, username, password)
+    airlines_dataset = adapt_airlines(airlines_dataset)
     # read from Hive Streaming
     airlines_dataset_streaming = h2o.import_sql_select(connection_url, select_query, username, password, streaming=True)
+    airlines_dataset_streaming = adapt_airlines(airlines_dataset_streaming)
 
     # datasets should be identical from user's point of view
     pyunit_utils.compare_frames(airlines_dataset_original, airlines_dataset, 100, tol_numeric=0)
@@ -44,6 +46,7 @@ def gbm_on_hive():
     gbm_v1 = H2OGradientBoostingEstimator(model_id="gbm_airlines_v1", seed=2000000)
     gbm_v1.train(airlines_X_col_names, airlines_y_col_name,
                  training_frame=airlines_dataset, validation_frame=airlines_dataset_streaming)
+    # demonstrates that metrics can be slightly different due to different chunking on the backend
     assert gbm_v1.auc(train=True) == gbm_v1.auc(valid=True)
 
 
